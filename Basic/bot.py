@@ -10,7 +10,7 @@ if st.button("Send"):
     if inp.strip() != "":
         with st.spinner("Thinking..."):
             response = ollama.chat(
-                model="gemma:7b",
+                model="gemma3:1b",
                 messages=[
                     {"role": "user", "content": inp}
                 ]
