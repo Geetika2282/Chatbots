@@ -2,3 +2,5 @@ PyPDF2
 lancedb 
 sentence-transformers 
 ollama
+transformers
+torch

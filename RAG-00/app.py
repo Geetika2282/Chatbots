@@ -1,10 +1,11 @@
+import pyarrow as pa 
 import tempfile
 import lancedb
 import PyPDF2
 import re
 import ollama
-
 from PyPDF2 import PdfReader
+
 
 def readPDF(pdf_path):
     reader = PdfReader(pdf_path)
@@ -13,10 +14,8 @@ def readPDF(pdf_path):
         text = page.extract_text()
         if text:
             extracted_text += text + "\n"
-    
-        # 'delete=False' keeps the file on disk after closing so your RAG can read it
 
-    temp_txt = tempfile.NamedTemporaryFile(mode='w+', suffix='.txt',delete=False)
+    temp_txt = tempfile.NamedTemporaryFile(mode='w+', suffix='.txt', delete=False)
 
     try:
         temp_txt.write(extracted_text)
@@ -24,54 +23,33 @@ def readPDF(pdf_path):
         return temp_txt.name
     except Exception as e:
         import os
-        os.unlink((temp_txt.name))
+        os.unlink(temp_txt.name)
         raise e
 
-# load and print pdf->text data
+
 def load_data(txt_path):
     with open(txt_path, 'r') as f:
         return f.read()
-    
+
 
 def smart_chunk_resume(text):
     sections = re.split(r'\n[A-Z\s]{3,}\n', text)
     chunks = []
-
     for sec in sections:
         clean = sec.strip()
         if len(clean) > 50:
             chunks.append(clean)
+    return chunks
 
-    return chunks  
 
-def chunk_text(text, chunk_size=300):
+def chunk_text(text, chunk_size=50):
     words = text.split()
     chunks = []
-
     for i in range(0, len(words), chunk_size):
         chunk = " ".join(words[i: i+chunk_size])
         chunks.append(chunk)
     return chunks
 
-
-
-temp_file_path = readPDF("C:\\Users\\geetikak\\Documents\\GitHub\\Chatbots\\RAG-00\\example.pdf")
-print(f"Text saved to: {temp_file_path}")
-
-text = load_data(temp_file_path)
-print(text)
-chunks = chunk_text(text, 10)
-for k in range(len(chunks)):
-    print(f"{k}:{chunks[k]}\n")
-
-
-print("=" * 80)
-print(chunks[6])
-print("=" * 80)
-print("+" * 80)
-
-# Vector DB
-db = lancedb.connect("mydb")
 
 def get_embedding(text):
     response = ollama.embeddings(
@@ -80,23 +58,78 @@ def get_embedding(text):
     )
     return response['embedding']
 
-print(len(get_embedding("hello")))
 
-table = db.create__table(
+def search_doc(question, top_k=3):
+    q_emb = get_embedding(question)
+    results = table.search(q_emb).limit(top_k).to_list()
+    return [r["text"] for r in results]
+
+
+def ask(question, top_k=3):
+    # Step 1: Retrieve relevant chunks
+    context_chunks = search_doc(question, top_k)
+    context = "\n\n".join(context_chunks)
+
+    # Step 2: Generate a direct answer using LLM
+    response = ollama.chat(
+        model="gemma3:1b",  # change this to your available model (run 'ollama list' to check)
+        messages=[
+            {
+                "role": "system",
+                "content": "You are a helpful assistant. Answer the question using only the provided context. Be concise and direct."
+            },
+            {
+                "role": "user",
+                "content": f"Context:\n{context}\n\nQuestion: {question}"
+            }
+        ]
+    )
+    return response['message']['content']
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+temp_file_path = readPDF("C:\\Users\\geetikak\\Documents\\GitHub\\Chatbots\\RAG-00\\example.pdf")
+print(f"Text saved to: {temp_file_path}")
+
+text = load_data(temp_file_path)
+chunks = chunk_text(text, 200)
+
+# Vector DB
+db = lancedb.connect("mydb")
+
+schema = pa.schema([
+    pa.field("vector", pa.list_(pa.float32(), 768)),
+    pa.field("text", pa.string())
+])
+
+table = db.create_table(
     "chunks",
-    data=[{
-        "Vector": get_embedding("test"),
-        "text": "test"
-    }],
+    data=[],
+    schema=schema,
     mode="overwrite"
 )
 
-def smart_chunk_resume(text):
-    sections = re.split(r'\n[A-Z\s]{3,}\n', text)
-    chunks = []
+data = []
+for chunk in chunks:
+    emb = get_embedding(chunk)
+    data.append({
+        "vector": emb,
+        "text": chunk
+    })
 
-    for sec in sections:
-        clean = sec.strip()
-        if len(clean) > 50:
-            chunks.append(clean)
-            
+table.add(data)
+print("Stored in vector DB")
+
+# ── Ask Questions ─────────────────────────────────────────────────────────────
+print("_" * 60)
+print("Candidate name:")
+print(ask("What is the candidate name?"))
+
+print("_" * 60)
+print("Company name:")
+print(ask("Where does she currently work?"))
+
+print("_" * 60)
+print("Skills:")
+print(ask("What are her technical skills?"))
