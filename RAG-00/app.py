@@ -1,12 +1,12 @@
 import pyarrow as pa 
 import tempfile
 import lancedb
-import PyPDF2
+# import PyPDF2
 import re
 import ollama
 from PyPDF2 import PdfReader
 
-
+# 1. Read PDF and extract text
 def readPDF(pdf_path):
     reader = PdfReader(pdf_path)
     extracted_text = ""
@@ -26,12 +26,15 @@ def readPDF(pdf_path):
         os.unlink(temp_txt.name)
         raise e
 
-
+# Loads data from temp file
 def load_data(txt_path):
     with open(txt_path, 'r') as f:
         return f.read()
 
 
+# ===============================================
+# 2. CHUNKING 
+# ===============================================
 def smart_chunk_resume(text):
     sections = re.split(r'\n[A-Z\s]{3,}\n', text)
     chunks = []
@@ -41,7 +44,6 @@ def smart_chunk_resume(text):
             chunks.append(clean)
     return chunks
 
-
 def chunk_text(text, chunk_size=50):
     words = text.split()
     chunks = []
@@ -50,7 +52,9 @@ def chunk_text(text, chunk_size=50):
         chunks.append(chunk)
     return chunks
 
-
+# ===============================================
+# 3. EMBEDDING 
+# ===============================================
 def get_embedding(text):
     response = ollama.embeddings(
         model="embeddinggemma",
@@ -58,13 +62,18 @@ def get_embedding(text):
     )
     return response['embedding']
 
-
+# ===============================================
+# 4. SEARCHING 
+# ===============================================
 def search_doc(question, top_k=3):
     q_emb = get_embedding(question)
     results = table.search(q_emb).limit(top_k).to_list()
     return [r["text"] for r in results]
 
 
+# ===============================================
+# 5. ASKING QUESTIONS 
+# ===============================================
 def ask(question, top_k=3):
     # Step 1: Retrieve relevant chunks
     context_chunks = search_doc(question, top_k)
@@ -87,7 +96,7 @@ def ask(question, top_k=3):
     return response['message']['content']
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# ── Main ─────────────────────────────────────────
 
 temp_file_path = readPDF("C:\\Users\\geetikak\\Documents\\GitHub\\Chatbots\\RAG-00\\example.pdf")
 print(f"Text saved to: {temp_file_path}")
@@ -121,7 +130,7 @@ for chunk in chunks:
 table.add(data)
 print("Stored in vector DB")
 
-# ── Ask Questions ─────────────────────────────────────────────────────────────
+# ── Ask Questions ──────────────────────────────────────────────────
 print("_" * 60)
 print("Candidate name:")
 print(ask("What is the candidate name?"))
